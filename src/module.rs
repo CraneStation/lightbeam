@@ -1,14 +1,27 @@
 use error::Error;
 use translate_sections;
 use wasmparser::{ModuleReader, SectionCode};
+use function_body::TranslatedFunc;
+
+#[derive(Default)]
+pub struct TranslatedModule {
+    translated_funcs: Vec<TranslatedFunc>,
+}
+
+impl TranslatedModule {
+    pub fn funcs(&self) -> &[TranslatedFunc] {
+        &self.translated_funcs
+    }
+}
 
 /// Translate from a slice of bytes holding a wasm module.
-pub fn translate(data: &[u8]) -> Result<(), Error> {
+pub fn translate(data: &[u8]) -> Result<TranslatedModule, Error> {
     let mut reader = ModuleReader::new(data)?;
+    let mut output = TranslatedModule::default();
 
     reader.skip_custom_sections()?;
     if reader.eof() {
-        return Ok(());
+        return Ok(output);
     }
     let mut section = reader.read()?;
 
@@ -18,7 +31,7 @@ pub fn translate(data: &[u8]) -> Result<(), Error> {
 
         reader.skip_custom_sections()?;
         if reader.eof() {
-            return Ok(());
+            return Ok(output);
         }
         section = reader.read()?;
     }
@@ -29,7 +42,7 @@ pub fn translate(data: &[u8]) -> Result<(), Error> {
 
         reader.skip_custom_sections()?;
         if reader.eof() {
-            return Ok(());
+            return Ok(output);
         }
         section = reader.read()?;
     }
@@ -40,7 +53,7 @@ pub fn translate(data: &[u8]) -> Result<(), Error> {
 
         reader.skip_custom_sections()?;
         if reader.eof() {
-            return Ok(());
+            return Ok(output);
         }
         section = reader.read()?;
     }
@@ -51,7 +64,7 @@ pub fn translate(data: &[u8]) -> Result<(), Error> {
 
         reader.skip_custom_sections()?;
         if reader.eof() {
-            return Ok(());
+            return Ok(output);
         }
         section = reader.read()?;
     }
@@ -62,7 +75,7 @@ pub fn translate(data: &[u8]) -> Result<(), Error> {
 
         reader.skip_custom_sections()?;
         if reader.eof() {
-            return Ok(());
+            return Ok(output);
         }
         section = reader.read()?;
     }
@@ -73,7 +86,7 @@ pub fn translate(data: &[u8]) -> Result<(), Error> {
 
         reader.skip_custom_sections()?;
         if reader.eof() {
-            return Ok(());
+            return Ok(output);
         }
         section = reader.read()?;
     }
@@ -84,7 +97,7 @@ pub fn translate(data: &[u8]) -> Result<(), Error> {
 
         reader.skip_custom_sections()?;
         if reader.eof() {
-            return Ok(());
+            return Ok(output);
         }
         section = reader.read()?;
     }
@@ -95,7 +108,7 @@ pub fn translate(data: &[u8]) -> Result<(), Error> {
 
         reader.skip_custom_sections()?;
         if reader.eof() {
-            return Ok(());
+            return Ok(output);
         }
         section = reader.read()?;
     }
@@ -106,18 +119,18 @@ pub fn translate(data: &[u8]) -> Result<(), Error> {
 
         reader.skip_custom_sections()?;
         if reader.eof() {
-            return Ok(());
+            return Ok(output);
         }
         section = reader.read()?;
     }
 
     if let SectionCode::Code = section.code {
         let code = section.get_code_section_reader()?;
-        translate_sections::code(code)?;
+        output.translated_funcs = translate_sections::code(code)?;
 
         reader.skip_custom_sections()?;
         if reader.eof() {
-            return Ok(());
+            return Ok(output);
         }
         section = reader.read()?;
     }
@@ -127,5 +140,5 @@ pub fn translate(data: &[u8]) -> Result<(), Error> {
         translate_sections::data(data)?;
     }
 
-    Ok(())
+    Ok(output)
 }

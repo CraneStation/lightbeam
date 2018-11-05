@@ -2,8 +2,28 @@ use backend::*;
 use disassemble::disassemble;
 use error::Error;
 use wasmparser::{FunctionBody, Operator};
+use dynasmrt::{ExecutableBuffer, AssemblyOffset};
 
-pub fn translate(body: &FunctionBody) -> Result<(), Error> {
+pub struct TranslatedFunc {
+    buf: ExecutableBuffer,
+}
+
+impl TranslatedFunc {
+    // Assume signature is (i32, i32) -> i32 for now.
+    // TODO: Handle generic signatures.
+    pub fn execute(&self, a: usize, b: usize) -> usize {
+        use std::mem;
+
+        let start_buf = self.buf.ptr(AssemblyOffset(0));
+
+        unsafe {
+            let func = mem::transmute::<_, extern "sysv64" fn(usize, usize) -> usize>(start_buf);
+            func(a, b)
+        }
+    }
+}
+
+pub fn translate(body: &FunctionBody) -> Result<TranslatedFunc, Error> {
     let locals = body.get_locals_reader()?;
 
     // Assume signature is (i32, i32) -> i32 for now.
@@ -53,5 +73,7 @@ pub fn translate(body: &FunctionBody) -> Result<(), Error> {
     // TODO: Do something with the output.
     disassemble(&output)?;
 
-    Ok(())
+    Ok(TranslatedFunc {
+        buf: output,
+    })
 }

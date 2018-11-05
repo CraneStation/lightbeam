@@ -1,5 +1,5 @@
 use error::Error;
-use function_body;
+use function_body::{self, TranslatedFunc};
 #[allow(unused_imports)] // for now
 use wasmparser::{
     CodeSectionReader, Data, DataSectionReader, Element, ElementSectionReader, Export,
@@ -79,11 +79,12 @@ pub fn element(elements: ElementSectionReader) -> Result<(), Error> {
 }
 
 /// Parses the Code section of the wasm module.
-pub fn code(code: CodeSectionReader) -> Result<(), Error> {
-    for body in code {
-        function_body::translate(&body?)?;
-    }
-    Ok(())
+pub fn code(code: CodeSectionReader) -> Result<Vec<TranslatedFunc>, Error> {
+    let bodies = code
+        .into_iter()
+        .map(|body| function_body::translate(&body?))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(bodies)
 }
 
 /// Parses the Data section of the wasm module.

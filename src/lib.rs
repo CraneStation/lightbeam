@@ -15,4 +15,7 @@ mod function_body;
 mod module;
 mod translate_sections;
 
+
 pub use module::translate;
+pub use module::TranslatedModule;
+pub use function_body::TranslatedFunc;
