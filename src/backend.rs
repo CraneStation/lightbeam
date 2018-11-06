@@ -44,12 +44,15 @@ impl GPRs {
     }
 
     fn release(&mut self, gpr: GPR) {
-        assert_eq!(
-            self.bits & (1 << gpr),
-            0,
-            "released register was already free"
+        assert!(
+            !self.is_free(gpr),
+            "released register was already free",
         );
         self.bits |= 1 << gpr;
+    }
+
+    fn is_free(&self, gpr: GPR) -> bool {
+        (self.bits & (1 << gpr)) != 0
     }
 }
 
@@ -195,7 +198,10 @@ pub fn copy_incoming_arg(ctx: &mut Context, ops: &mut Assembler, arg_pos: u32) {
     let reg = match loc {
         ArgLocation::Reg(reg) => reg,
         ArgLocation::Stack(offset) => {
-            // RAX is always scratch?
+            assert!(
+                ctx.regs.scratch_gprs.is_free(RAX),
+                "we assume that RAX can be used as a scratch register for now",
+            );
             dynasm!(ops
                 ; mov Rq(RAX), [rsp + offset]
             );
