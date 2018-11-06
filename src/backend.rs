@@ -88,15 +88,19 @@ enum ArgLocation {
 /// Get a location for an argument at the given position.
 fn abi_loc_for_arg(pos: u32) -> ArgLocation {
     // TODO: This assumes only system-v calling convention.
+    // In system-v calling convention the first 6 arguments are passed via registers. 
+    // All rest arguments are passed on the stack.
     const ARGS_IN_GPRS: &'static [GPR] = &[
         RDI,
         RSI,
         RDX,
         RCX,
+        R8,
+        R9,
     ];
 
-    if pos < ARGS_IN_GPRS.len() as u32 {
-        ArgLocation::Reg(ARGS_IN_GPRS[pos as usize])
+    if let Some(&reg) = ARGS_IN_GPRS.get(pos as usize) {
+        ArgLocation::Reg(reg)
     } else {
         let stack_pos = pos - ARGS_IN_GPRS.len() as u32;
         ArgLocation::Stack((stack_pos * WORD_SIZE) as i32)
