@@ -110,8 +110,8 @@ fn abi_loc_for_arg(pos: u32) -> ArgLocation {
 
 pub struct Context {
     regs: Registers,
-    /// Offset from starting value of SP. Updated on every push or pop
-    /// on the value stack.
+    /// Offset from starting value of SP counted in words. Each push and pop 
+    /// on the value stack increments or decrements this value by 1 respectively.
     sp_depth: usize,
 }
 
