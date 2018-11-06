@@ -31,3 +31,5 @@ fn adds() {
         assert_eq!(execute_wat(code, *a, *b), *expected);
     }
 }
+
+// TODO: Add a test that checks argument passing via the stack.

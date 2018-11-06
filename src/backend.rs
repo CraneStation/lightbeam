@@ -104,7 +104,10 @@ fn abi_loc_for_arg(pos: u32) -> ArgLocation {
         ArgLocation::Reg(reg)
     } else {
         let stack_pos = pos - ARGS_IN_GPRS.len() as u32;
-        ArgLocation::Stack((stack_pos * WORD_SIZE) as i32)
+        // +2 is because the first argument is located right after the saved frame pointer slot 
+        // and the incoming return address.
+        let stack_offset = ((stack_pos + 2) * WORD_SIZE) as i32;
+        ArgLocation::Stack(stack_offset)
     }
 }
 
