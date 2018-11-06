@@ -219,7 +219,8 @@ pub fn prologue(_ctx: &mut Context, ops: &mut Assembler, stack_slots: u32) {
     );
 }
 
-pub fn epilogue(_ctx: &mut Context, ops: &mut Assembler) {
+pub fn epilogue(ctx: &mut Context, ops: &mut Assembler) {
+    assert_eq!(ctx.sp_depth, 0, "imbalanced pushes and pops detected");
     dynasm!(ops
         ; mov rsp, rbp
         ; pop rbp
