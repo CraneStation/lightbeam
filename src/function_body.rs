@@ -52,7 +52,7 @@ pub fn translate(body: &FunctionBody) -> Result<TranslatedFunc, Error> {
                 add_i32(&mut ctx, &mut ops);
             }
             Operator::GetLocal { local_index } => {
-                load_i32(&mut ctx, &mut ops, local_index);
+                get_local_i32(&mut ctx, &mut ops, local_index);
             }
             Operator::End => {
                 // TODO: This is super naive and makes a lot of unfounded assumptions 

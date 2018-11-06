@@ -156,7 +156,7 @@ fn sp_relative_offset(ctx: &mut Context, slot_idx: u32) -> i32 {
     ((ctx.sp_depth as i32) + slot_idx as i32) * WORD_SIZE as i32
 }
 
-pub fn load_i32(ctx: &mut Context, ops: &mut Assembler, local_idx: u32) {
+pub fn get_local_i32(ctx: &mut Context, ops: &mut Assembler, local_idx: u32) {
     let gpr = ctx.regs.take_scratch_gpr();
     let offset = sp_relative_offset(ctx, local_idx);
     dynasm!(ops
