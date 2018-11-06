@@ -150,7 +150,7 @@ pub fn add_i32(ctx: &mut Context, ops: &mut Assembler) {
     let op0 = pop_i32(ctx, ops);
     let op1 = pop_i32(ctx, ops);
     dynasm!(ops
-        ; add Rq(op0), Rq(op1)
+        ; add Rd(op0), Rd(op1)
     );
     push_i32(ctx, ops, op0);
     ctx.regs.release_scratch_gpr(op1);
