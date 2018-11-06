@@ -3,6 +3,7 @@
 use dynasmrt::x64::Assembler;
 use dynasmrt::DynasmApi;
 
+/// Size of a pointer on the target in bytes.
 const WORD_SIZE: u32 = 8;
 
 type GPR = u8;
