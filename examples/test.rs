@@ -22,9 +22,7 @@ fn read_to_end<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
 fn maybe_main() -> Result<(), String> {
     let data = read_to_end("test.wasm").map_err(|e| e.to_string())?;
     let translated = translate(&data).map_err(|e| e.to_string())?;
-
-    let func = &translated.funcs()[0];
-    let result = func.execute(5, 3);
+    let result = translated.execute_func(0, 5, 3);
     println!("f(5, 3) = {}", result);
 
     Ok(())

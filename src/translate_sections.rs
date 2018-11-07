@@ -1,5 +1,5 @@
 use error::Error;
-use function_body::{self, TranslatedFunc};
+use function_body;
 #[allow(unused_imports)] // for now
 use wasmparser::{
     CodeSectionReader, Data, DataSectionReader, Element, ElementSectionReader, Export,
@@ -7,6 +7,7 @@ use wasmparser::{
     GlobalSectionReader, GlobalType, Import, ImportSectionEntryType, ImportSectionReader,
     MemorySectionReader, MemoryType, Operator, TableSectionReader, Type, TypeSectionReader,
 };
+use backend::{CodeGenSession, TranslatedCodeSection};
 
 /// Parses the Type section of the wasm module.
 pub fn type_(types: TypeSectionReader) -> Result<(), Error> {
@@ -79,12 +80,12 @@ pub fn element(elements: ElementSectionReader) -> Result<(), Error> {
 }
 
 /// Parses the Code section of the wasm module.
-pub fn code(code: CodeSectionReader) -> Result<Vec<TranslatedFunc>, Error> {
-    let bodies = code
-        .into_iter()
-        .map(|body| function_body::translate(&body?))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(bodies)
+pub fn code(code: CodeSectionReader) -> Result<TranslatedCodeSection, Error> {
+    let mut session = CodeGenSession::new();
+    for body in code {
+        function_body::translate(&mut session, &body?)?;
+    }
+    Ok(session.into_translated_code_section()?)
 }
 
 /// Parses the Data section of the wasm module.

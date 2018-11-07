@@ -22,4 +22,3 @@ mod tests;
 
 pub use module::translate;
 pub use module::TranslatedModule;
-pub use function_body::TranslatedFunc;

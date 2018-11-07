@@ -10,8 +10,7 @@ fn translate_wat(wat: &str) -> TranslatedModule {
 /// Execute the first function in the module.
 fn execute_wat(wat: &str, a: usize, b: usize) -> usize {
     let translated = translate_wat(wat);
-    let func = &translated.funcs()[0];
-    func.execute(a, b)
+    translated.execute_func(0, a, b)
 }
 
 #[test]

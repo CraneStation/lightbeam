@@ -1,7 +1,8 @@
 #![allow(dead_code)] // for now
 
+use error::Error;
 use dynasmrt::x64::Assembler;
-use dynasmrt::DynasmApi;
+use dynasmrt::{DynasmApi, AssemblyOffset, ExecutableBuffer};
 
 /// Size of a pointer on the target in bytes.
 const WORD_SIZE: u32 = 8;
@@ -114,48 +115,92 @@ fn abi_loc_for_arg(pos: u32) -> ArgLocation {
     }
 }
 
-pub struct Context {
+pub struct CodeGenSession {
+    assembler: Assembler,
+    func_starts: Vec<AssemblyOffset>,
+}
+
+impl CodeGenSession {
+    pub fn new() -> Self {
+        CodeGenSession {
+            assembler: Assembler::new().unwrap(),
+            func_starts: Vec::new(),
+        }
+    }
+
+    pub fn new_context(&mut self) -> Context {
+        let start_offset = self.assembler.offset();
+        self.func_starts.push(start_offset);
+        Context {
+            asm: &mut self.assembler,
+            start: start_offset,
+            regs: Registers::new(),
+            sp_depth: 0,
+        }
+    }
+
+    pub fn into_translated_code_section(self) -> Result<TranslatedCodeSection, Error>  {
+        let exec_buf = self.assembler
+            .finalize()
+            .map_err(|_asm| Error::Assembler("assembler error".to_owned()))?;
+        Ok(TranslatedCodeSection { exec_buf, func_starts: self.func_starts })
+    }
+}
+
+pub struct TranslatedCodeSection {
+    exec_buf: ExecutableBuffer,
+    func_starts: Vec<AssemblyOffset>,
+}
+
+impl TranslatedCodeSection {
+    pub fn func_start(&self, idx: usize) -> *const u8 {
+        let offset = self.func_starts[idx];
+        self.exec_buf.ptr(offset)
+    }
+}
+
+pub struct Context<'a> {
+    asm: &'a mut Assembler,
+    start: AssemblyOffset,
     regs: Registers,
     /// Offset from starting value of SP counted in words. Each push and pop 
     /// on the value stack increments or decrements this value by 1 respectively.
     sp_depth: u32,
 }
 
-impl Context {
-    pub fn new() -> Self {
-        Context {
-            regs: Registers::new(),
-            sp_depth: 0,
-        }
+impl<'a> Context<'a> {
+    /// Returns the offset of the first instruction.
+    fn start(&self) -> AssemblyOffset {
+        self.start
     }
 }
 
-fn push_i32(ctx: &mut Context, ops: &mut Assembler, gpr: GPR) {
+fn push_i32(ctx: &mut Context, gpr: GPR) {
     // For now, do an actual push (and pop below). In the future, we could
     // do on-the-fly register allocation here.
     ctx.sp_depth += 1;
-    dynasm!(ops
+    dynasm!(ctx.asm
         ; push Rq(gpr)
     );
     ctx.regs.release_scratch_gpr(gpr);
 }
 
-fn pop_i32(ctx: &mut Context, ops: &mut Assembler) -> GPR {
+fn pop_i32(ctx: &mut Context) -> GPR {
     ctx.sp_depth -= 1;
     let gpr = ctx.regs.take_scratch_gpr();
-    dynasm!(ops
+    dynasm!(ctx.asm
         ; pop Rq(gpr)
     );
     gpr
 }
 
-pub fn add_i32(ctx: &mut Context, ops: &mut Assembler) {
-    let op0 = pop_i32(ctx, ops);
-    let op1 = pop_i32(ctx, ops);
-    dynasm!(ops
+pub fn add_i32(ctx: &mut Context) {
+    let op0 = pop_i32(ctx);
+    let op1 = pop_i32(ctx);
+    dynasm!(ctx.asm
         ; add Rd(op0), Rd(op1)
     );
-    push_i32(ctx, ops, op0);
+    push_i32(ctx, op0);
     ctx.regs.release_scratch_gpr(op1);
 }
 
@@ -163,35 +208,35 @@ fn sp_relative_offset(ctx: &mut Context, slot_idx: u32) -> i32 {
     ((ctx.sp_depth as i32) + slot_idx as i32) * WORD_SIZE as i32
 }
 
-pub fn get_local_i32(ctx: &mut Context, ops: &mut Assembler, local_idx: u32) {
+pub fn get_local_i32(ctx: &mut Context, local_idx: u32) {
     let gpr = ctx.regs.take_scratch_gpr();
     let offset = sp_relative_offset(ctx, local_idx);
-    dynasm!(ops
+    dynasm!(ctx.asm
         ; mov Rq(gpr), [rsp + offset]
     );
-    push_i32(ctx, ops, gpr);
+    push_i32(ctx, gpr);
 }
 
-pub fn store_i32(ctx: &mut Context, ops: &mut Assembler, local_idx: u32) {
-    let gpr = pop_i32(ctx, ops);
+pub fn store_i32(ctx: &mut Context, local_idx: u32) {
+    let gpr = pop_i32(ctx);
     let offset = sp_relative_offset(ctx, local_idx);
-    dynasm!(ops
+    dynasm!(ctx.asm
         ; mov [rsp + offset], Rq(gpr)
     );
     ctx.regs.release_scratch_gpr(gpr);
 }
 
-pub fn prepare_return_value(ctx: &mut Context, ops: &mut Assembler) {
-    let ret_gpr = pop_i32(ctx, ops);
+pub fn prepare_return_value(ctx: &mut Context) {
+    let ret_gpr = pop_i32(ctx);
     if ret_gpr != RAX {
-        dynasm!(ops
+        dynasm!(ctx.asm
             ; mov Rq(RAX), Rq(ret_gpr)
         );
         ctx.regs.release_scratch_gpr(ret_gpr);
     }
 }
 
-pub fn copy_incoming_arg(ctx: &mut Context, ops: &mut Assembler, arg_pos: u32) {
+pub fn copy_incoming_arg(ctx: &mut Context, arg_pos: u32) {
     let loc = abi_loc_for_arg(arg_pos);
 
     // First, ensure the argument is in a register.
@@ -202,7 +247,7 @@ pub fn copy_incoming_arg(ctx: &mut Context, ops: &mut Assembler, arg_pos: u32) {
                 ctx.regs.scratch_gprs.is_free(RAX),
                 "we assume that RAX can be used as a scratch register for now",
             );
-            dynasm!(ops
+            dynasm!(ctx.asm
                 ; mov Rq(RAX), [rsp + offset]
             );
             RAX
@@ -211,31 +256,31 @@ pub fn copy_incoming_arg(ctx: &mut Context, ops: &mut Assembler, arg_pos: u32) {
 
     // And then move a value from a register into local variable area on the stack.
     let offset = sp_relative_offset(ctx, arg_pos);
-    dynasm!(ops
+    dynasm!(ctx.asm
         ; mov [rsp + offset], Rq(reg) 
     );
 }
 
-pub fn prologue(_ctx: &mut Context, ops: &mut Assembler, stack_slots: u32) {
+pub fn prologue(ctx: &mut Context, stack_slots: u32) {
     let framesize: i32 = stack_slots as i32 * WORD_SIZE as i32;
-    dynasm!(ops
+    dynasm!(ctx.asm
         ; push rbp
         ; mov rbp, rsp
         ; sub rsp, framesize
     );
 }
 
-pub fn epilogue(ctx: &mut Context, ops: &mut Assembler) {
+pub fn epilogue(ctx: &mut Context) {
     assert_eq!(ctx.sp_depth, 0, "imbalanced pushes and pops detected");
-    dynasm!(ops
+    dynasm!(ctx.asm
         ; mov rsp, rbp
         ; pop rbp
         ; ret
     );
 }
 
-pub fn unsupported_opcode(ops: &mut Assembler) {
-    dynasm!(ops
+pub fn unsupported_opcode(ctx: &mut Context) {
+    dynasm!(ctx.asm
         ; ud2
     );
 }
