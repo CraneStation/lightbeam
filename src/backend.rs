@@ -262,12 +262,17 @@ pub fn copy_incoming_arg(ctx: &mut Context, arg_pos: u32) {
 }
 
 pub fn prologue(ctx: &mut Context, stack_slots: u32) {
-    let framesize: i32 = stack_slots as i32 * WORD_SIZE as i32;
+    // Align stack slots to the nearest even number. This is required
+    // by x86-64 ABI.
+    let aligned_stack_slots = (stack_slots + 1) & !1;
+
+    let framesize: i32 = aligned_stack_slots as i32 * WORD_SIZE as i32;
     dynasm!(ctx.asm
         ; push rbp
         ; mov rbp, rsp
         ; sub rsp, framesize
     );
+    ctx.sp_depth += aligned_stack_slots - stack_slots;
 }
 
 pub fn epilogue(ctx: &mut Context) {
