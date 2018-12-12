@@ -39,10 +39,17 @@ const R15: u8 = 15;
 
 impl GPRs {
     fn take(&mut self) -> GPR {
+        self.try_take().expect("ran out of free GPRs")
+    }
+
+    fn try_take(&mut self) -> Option<GPR> {
         let lz = self.bits.trailing_zeros();
-        assert!(lz < 32, "ran out of free GPRs");
-        self.bits &= !(1 << lz);
-        lz as GPR
+        if lz < 16 {
+            self.bits &= !(1 << lz);
+            Some(lz as GPR)
+        } else {
+            None
+        }
     }
 
     fn release(&mut self, gpr: GPR) {
@@ -52,6 +59,10 @@ impl GPRs {
 
     fn is_free(&self, gpr: GPR) -> bool {
         (self.bits & (1 << gpr)) != 0
+    }
+
+    fn free_count(&self) -> u32 {
+        self.bits.count_ones()
     }
 }
 
@@ -65,9 +76,16 @@ impl Registers {
             scratch_gprs: GPRs::new(),
         };
         // Give ourselves a few scratch registers to work with, for now.
+        // The list of registers that we can stomp on is taken from
+        // Wikipedia's article on System V
+        // https://en.wikipedia.org/wiki/X86_calling_conventions#System_V_AMD64_ABI
+        result.release_scratch_gpr(RDI);
+        result.release_scratch_gpr(RSI);
         result.release_scratch_gpr(RAX);
         result.release_scratch_gpr(RCX);
         result.release_scratch_gpr(RDX);
+        result.release_scratch_gpr(R8);
+        result.release_scratch_gpr(R9);
         result
     }
 
@@ -75,8 +93,16 @@ impl Registers {
         self.scratch_gprs.take()
     }
 
+    pub fn try_take_scratch_gpr(&mut self) -> Option<GPR> {
+        self.scratch_gprs.try_take()
+    }
+
     pub fn release_scratch_gpr(&mut self, gpr: GPR) {
         self.scratch_gprs.release(gpr);
+    }
+
+    pub fn free_count(&self) -> u32 {
+        self.scratch_gprs.free_count()
     }
 }
 
@@ -140,6 +166,7 @@ impl CodeGenSession {
             func_starts: &self.func_starts,
             regs: Registers::new(),
             sp_depth: StackDepth(0),
+            register_stack: vec![],
         }
     }
 
@@ -181,6 +208,8 @@ pub struct Context<'a> {
     asm: &'a mut Assembler,
     func_starts: &'a Vec<(Option<AssemblyOffset>, DynamicLabel)>,
     regs: Registers,
+    // TODO: Use `ArrayVec`?
+    register_stack: Vec<GPR>,
     /// Each push and pop on the value stack increments or decrements this value by 1 respectively.
     sp_depth: StackDepth,
 }
@@ -225,22 +254,44 @@ pub fn restore_stack_depth(ctx: &mut Context, stack_depth: StackDepth) {
 }
 
 fn push_i32(ctx: &mut Context, gpr: GPR) {
-    // For now, do an actual push (and pop below). In the future, we could
-    // do on-the-fly register allocation here.
-    ctx.sp_depth.reserve(1);
-    dynasm!(ctx.asm
-        ; push Rq(gpr)
-    );
-    ctx.regs.release_scratch_gpr(gpr);
+    if ctx.regs.free_count() >= 2 {
+        ctx.sp_depth.reserve(1);
+        dynasm!(ctx.asm
+            ; push Rq(gpr)
+        );
+        ctx.regs.release_scratch_gpr(gpr);
+    } else {
+        ctx.register_stack.push(gpr);
+    }
 }
 
 fn pop_i32(ctx: &mut Context) -> GPR {
-    ctx.sp_depth.free(1);
-    let gpr = ctx.regs.take_scratch_gpr();
-    dynasm!(ctx.asm
-        ; pop Rq(gpr)
-    );
-    gpr
+    if let Some(currently_in) = ctx.register_stack.pop() {
+        currently_in
+    } else {
+        let reg = ctx.regs.take_scratch_gpr();
+        ctx.sp_depth.free(1);
+        dynasm!(ctx.asm
+            ; pop Rq(reg)
+        );
+        reg
+    }
+}
+
+fn pop_i32_into(ctx: &mut Context, reg: GPR) {
+    if let Some(currently_in) = ctx.register_stack.pop() {
+        if reg != currently_in {
+            dynasm!(ctx.asm
+                ; mov Rq(reg), Rq(currently_in)
+            );
+            ctx.regs.release_scratch_gpr(currently_in);
+        }
+    } else {
+        ctx.sp_depth.free(1);
+        dynasm!(ctx.asm
+            ; pop Rq(reg)
+        );
+    }
 }
 
 pub fn i32_add(ctx: &mut Context) {
@@ -405,21 +456,13 @@ pub fn copy_incoming_arg(ctx: &mut Context, frame_size: u32, arg_pos: u32) {
 fn pass_outgoing_args(ctx: &mut Context, arity: u32) -> i32 {
     let mut stack_args = Vec::with_capacity((arity as usize).saturating_sub(ARGS_IN_GPRS.len()));
     for arg_pos in (0..arity).rev() {
-        ctx.sp_depth.free(1);
-
         let loc = abi_loc_for_arg(arg_pos);
         match loc {
             ArgLocation::Reg(gpr) => {
-                dynasm!(ctx.asm
-                    ; pop Rq(gpr)
-                );
+                pop_i32_into(ctx, gpr);
             }
             ArgLocation::Stack(_) => {
-                let gpr = ctx.regs.take_scratch_gpr();
-                dynasm!(ctx.asm
-                    ; pop Rq(gpr)
-                );
-                stack_args.push(gpr);
+                stack_args.push(pop_i32(ctx));
             }
         }
     }

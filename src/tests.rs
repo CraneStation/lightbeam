@@ -322,8 +322,15 @@ fn fib() {
     // fac(x) = y <=> (x, y)
     const FIB_SEQ: &[u32] = &[1, 1, 2, 3, 5, 8, 13, 21, 34, 55];
 
+    let translated = translate_wat(code);
+
     for x in 0..10 {
-        assert_eq!(execute_wat(code, x, 0), FIB_SEQ[x as usize]);
+        unsafe {
+            assert_eq!(
+                translated.execute_func::<_, u32>(0, (x, 0)),
+                FIB_SEQ[x as usize]
+            );
+        }
     }
 }
 
