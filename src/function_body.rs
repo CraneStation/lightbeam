@@ -226,8 +226,12 @@ pub fn translate(
                 // TODO: this implementation assumes that this function is locally defined.
                 // TODO: guarantee 16-byte alignment for calls as required by x86-64 ABI
 
-                pass_outgoing_args(&mut ctx, callee_ty.params.len() as u32);
-                call_direct(&mut ctx, function_index, callee_ty.returns.len() as u32);
+                call_direct(
+                    &mut ctx,
+                    function_index,
+                    callee_ty.params.len() as u32,
+                    callee_ty.returns.len() as u32,
+                );
             }
             _ => {
                 trap(&mut ctx);
