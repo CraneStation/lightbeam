@@ -45,8 +45,9 @@ impl GPRs {
     fn try_take(&mut self) -> Option<GPR> {
         let lz = self.bits.trailing_zeros();
         if lz < 16 {
-            self.bits &= !(1 << lz);
-            Some(lz as GPR)
+            let gpr = lz as GPR;
+            self.mark_used(gpr);
+            Some(gpr)
         } else {
             None
         }
@@ -55,6 +56,10 @@ impl GPRs {
     fn release(&mut self, gpr: GPR) {
         assert!(!self.is_free(gpr), "released register was already free",);
         self.bits |= 1 << gpr;
+    }
+
+    fn mark_used(&mut self, gpr: GPR) {
+        self.bits &= !(1 << gpr as u16);
     }
 
     fn is_free(&self, gpr: GPR) -> bool {
@@ -89,6 +94,10 @@ impl Registers {
         result
     }
 
+    pub fn mark_used(&mut self, gpr: GPR) {
+        self.scratch_gprs.mark_used(gpr);
+    }
+
     pub fn take_scratch_gpr(&mut self) -> GPR {
         self.scratch_gprs.take()
     }
@@ -99,6 +108,10 @@ impl Registers {
 
     pub fn release_scratch_gpr(&mut self, gpr: GPR) {
         self.scratch_gprs.release(gpr);
+    }
+
+    pub fn is_free(&self, gpr: GPR) -> bool {
+        self.scratch_gprs.is_free(gpr)
     }
 
     pub fn free_count(&self) -> u32 {
@@ -265,8 +278,29 @@ fn push_i32(ctx: &mut Context, gpr: GPR) {
     }
 }
 
+/// Pushes the GPR into a new register, in case you wanted to restore
+/// the value of the register that it was already in but without
+/// throwing away the value.
+fn push_i32_into_new(ctx: &mut Context, gpr: GPR) {
+    if ctx.regs.free_count() >= 2 {
+        ctx.sp_depth.reserve(1);
+        dynasm!(ctx.asm
+            ; push Rq(gpr)
+        );
+        ctx.regs.release_scratch_gpr(gpr);
+    } else {
+        let reg = ctx.regs.take_scratch_gpr();
+        dynasm!(ctx.asm
+            ; mov Rq(reg), Rq(gpr)
+        );
+
+        ctx.register_stack.push(reg);
+    }
+}
+
 fn pop_i32(ctx: &mut Context) -> GPR {
-    if let Some(currently_in) = ctx.register_stack.pop() {
+    if ctx.sp_depth.0 == 0 {
+        let currently_in = ctx.register_stack.pop().expect("Stack is empty!");
         currently_in
     } else {
         let reg = ctx.regs.take_scratch_gpr();
@@ -279,7 +313,8 @@ fn pop_i32(ctx: &mut Context) -> GPR {
 }
 
 fn pop_i32_into(ctx: &mut Context, reg: GPR) {
-    if let Some(currently_in) = ctx.register_stack.pop() {
+    if ctx.sp_depth.0 == 0 {
+        let currently_in = ctx.register_stack.pop().expect("Stack is empty!");
         if reg != currently_in {
             dynasm!(ctx.asm
                 ; mov Rq(reg), Rq(currently_in)
@@ -491,6 +526,13 @@ fn post_call_cleanup(ctx: &mut Context, num_stack_args: i32) {
 pub fn call_direct(ctx: &mut Context, index: u32, arg_arity: u32, return_arity: u32) {
     assert!(return_arity == 0 || return_arity == 1);
 
+    let restore_rax = !ctx.regs.is_free(RAX);
+    if restore_rax {
+        dynasm!(ctx.asm
+            ; push rax
+        );
+    }
+
     let num_stack_args = pass_outgoing_args(ctx, arg_arity);
 
     let label = &ctx.func_starts[index as usize].1;
@@ -500,11 +542,19 @@ pub fn call_direct(ctx: &mut Context, index: u32, arg_arity: u32, return_arity: 
 
     post_call_cleanup(ctx, num_stack_args);
 
-    if return_arity == 1 {
+    if restore_rax {
+        if return_arity == 1 {
+            ctx.sp_depth.reserve(1);
+        }
+
+        push_i32_into_new(ctx, RAX);
+
         dynasm!(ctx.asm
-            ; push rax
+            ; pop rax
         );
-        ctx.sp_depth.reserve(1);
+    } else {
+        ctx.regs.mark_used(RAX);
+        push_i32(ctx, RAX);
     }
 }
 
